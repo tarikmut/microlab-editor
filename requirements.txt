@@ -1,0 +1,4 @@
+# MICROLab Standalone Content Creator Suite - Gereksinimler
+# Bu dosya uygulamanın tam işlevsel çalışması için gereken Python paketlerini içerir.
+
+Pillow>=9.0.0
