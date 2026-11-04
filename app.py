@@ -33,7 +33,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 # APP VERSION & REPO CONFIG
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 DEFAULT_GITHUB_REPO = "tarikmut/microlab-editor"
 
 try:
@@ -1683,7 +1683,6 @@ class MicroLabEditorApp(tk.Tk):
         scroll_frame = ttk.Frame(canvas)
 
         def _update_scroll_region(event=None):
-            canvas.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         scroll_frame.bind("<Configure>", _update_scroll_region)
@@ -1863,7 +1862,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         scroll_frame = ttk.Frame(canvas)
 
         def _update_scroll_region(event=None):
-            canvas.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         scroll_frame.bind("<Configure>", _update_scroll_region)
@@ -1958,7 +1956,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         scroll_frame = ttk.Frame(canvas)
 
         def _update_scroll_region(event=None):
-            canvas.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         scroll_frame.bind("<Configure>", _update_scroll_region)
@@ -2067,7 +2064,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         scroll_frame = ttk.Frame(canvas)
 
         def _update_scroll_region(event=None):
-            canvas.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         scroll_frame.bind("<Configure>", _update_scroll_region)
@@ -2124,7 +2120,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         scroll_frame = ttk.Frame(canvas)
 
         def _update_scroll_region(event=None):
-            canvas.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         scroll_frame.bind("<Configure>", _update_scroll_region)
@@ -3312,12 +3307,16 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         os.makedirs(js_dir, exist_ok=True)
 
         css_file = os.path.join(css_dir, "main.css")
-        with open(css_file, "w", encoding="utf-8") as f:
-            f.write(EMBEDDED_CSS_CONTENT)
+        # Sitede zaten varsa üzerine yazma (sitenin kendi tasarımını korur)
+        if not os.path.exists(css_file):
+            with open(css_file, "w", encoding="utf-8") as f:
+                f.write(EMBEDDED_CSS_CONTENT)
 
         js_file = os.path.join(js_dir, "main.js")
-        with open(js_file, "w", encoding="utf-8") as f:
-            f.write(EMBEDDED_JS_CONTENT)
+        # Sitede zaten varsa üzerine yazma (sitenin kendi tasarımını korur)
+        if not os.path.exists(js_file):
+            with open(js_file, "w", encoding="utf-8") as f:
+                f.write(EMBEDDED_JS_CONTENT)
 
     def _save_project(self, target_base_dir):
         title = self.proj_title_entry.get().strip()
