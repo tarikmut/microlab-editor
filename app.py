@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-MICROLab Editor v1.0 (100% Independent)
-=======================================
+MICROLab Editor v1.0.2 (100% Independent)
+=========================================
 Tamamen Bağımsız (Standalone) Web Sitesi İçerik Yönetim ve Üretim Editörü.
 - Canlı önizleme %100 dahili CSS ve JS içerir (Dış dosya yolu gerektirmez).
 - Başka bir bilgisayara sadece bu klasör kopyalanıp gönderildiğinde sorunsuz çalışır.
@@ -33,7 +33,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 # APP VERSION & REPO CONFIG
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 DEFAULT_GITHUB_REPO = "tarikmut/microlab-editor"
 
 try:
@@ -41,6 +41,58 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+# CROSS-PLATFORM MEDIA & SECURITY HELPERS
+try:
+    from media_portability import (
+        IMAGE_FILETYPES,
+        HTML_FILETYPES,
+        path_to_file_uri,
+        safe_copy_media_file,
+        rehydrate_media_path,
+        rehydrate_blocks_data,
+        make_portable_blocks_data,
+        escape_html_text,
+        escape_html_attr,
+        is_safe_url,
+        sanitize_url_for_href
+    )
+except ImportError:
+    try:
+        from .media_portability import (
+            IMAGE_FILETYPES,
+            HTML_FILETYPES,
+            path_to_file_uri,
+            safe_copy_media_file,
+            rehydrate_media_path,
+            rehydrate_blocks_data,
+            make_portable_blocks_data,
+            escape_html_text,
+            escape_html_attr,
+            is_safe_url,
+            sanitize_url_for_href
+        )
+    except Exception:
+        IMAGE_FILETYPES = [
+            ("Görseller", ("*.png", "*.PNG", "*.jpg", "*.JPG", "*.jpeg", "*.JPEG",
+                           "*.webp", "*.WEBP", "*.svg", "*.SVG",
+                           "*.gif", "*.GIF", "*.bmp", "*.BMP",
+                           "*.tiff", "*.TIFF", "*.tif", "*.TIF",
+                           "*.heic", "*.HEIC", "*.heif", "*.HEIF")),
+            ("Tüm Dosyalar", "*")
+        ]
+        HTML_FILETYPES = [
+            ("MICROLab HTML Dosyaları", ("*.html", "*.HTML", "*.htm", "*.HTM")),
+            ("Tüm Dosyalar", "*")
+        ]
+
+try:
+    from preview_runtime import PreviewRuntimeSession
+except ImportError:
+    try:
+        from .preview_runtime import PreviewRuntimeSession
+    except Exception:
+        PreviewRuntimeSession = None
 
 # YOUTUBE ID EXTRACTOR
 def extract_youtube_id(url):
@@ -760,17 +812,38 @@ def slugify(text):
 def get_svg_placeholder(label="Görsel Seçi̇lmedi̇"):
     return f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='400' viewBox='0 0 800 400'><rect width='100%' height='100%' fill='%231e293b'/><text x='50%' y='50%' fill='%2394a3b8' font-family='sans-serif' font-size='24' font-weight='bold' text-anchor='middle' dominant-baseline='middle'>📷 {label}</text></svg>"
 
-# MOUSEWHEEL HELPER
+# MOUSEWHEEL HELPER (CROSS-PLATFORM & TEXT WIDGET AWARE)
 def bind_mouse_wheel(widget, canvas):
     def _on_mousewheel(event):
+        if isinstance(event.widget, tk.Text):
+            return
         if sys.platform == "darwin":
-            canvas.yview_scroll(int(-1 * event.delta), "units")
+            delta = int(-1 * event.delta)
         else:
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            delta = int(-1 * (event.delta / 120)) if event.delta else 0
+        if delta != 0:
+            try:
+                canvas.yview_scroll(delta, "units")
+            except Exception:
+                pass
 
-    widget.bind("<MouseWheel>", _on_mousewheel)
-    widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
-    widget.bind("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+    def _scroll_up(event):
+        if not isinstance(event.widget, tk.Text):
+            try:
+                canvas.yview_scroll(-1, "units")
+            except Exception:
+                pass
+
+    def _scroll_down(event):
+        if not isinstance(event.widget, tk.Text):
+            try:
+                canvas.yview_scroll(1, "units")
+            except Exception:
+                pass
+
+    widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+    widget.bind("<Button-4>", _scroll_up, add="+")
+    widget.bind("<Button-5>", _scroll_down, add="+")
 
     for child in widget.winfo_children():
         bind_mouse_wheel(child, canvas)
@@ -855,7 +928,7 @@ class ContentBlockEditor(ttk.LabelFrame):
             path_entry.grid(row=0, column=1, padx=5, sticky="ew")
 
             def browse_img():
-                p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.svg;*.webp")])
+                p = filedialog.askopenfilename(filetypes=IMAGE_FILETYPES)
                 if p:
                     path_entry.delete(0, tk.END)
                     path_entry.insert(0, p)
@@ -978,7 +1051,7 @@ class ContentBlockEditor(ttk.LabelFrame):
                     p_entry.pack(side="left", padx=4)
 
                     def browse_gal_img(pe=p_entry):
-                        p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.svg;*.webp")])
+                        p = filedialog.askopenfilename(filetypes=IMAGE_FILETYPES)
                         if p:
                             pe.delete(0, tk.END)
                             pe.insert(0, p)
@@ -1079,12 +1152,12 @@ class ContentBlockEditor(ttk.LabelFrame):
             w = b['widgets']
             if btype == 'heading':
                 lvl = w['level'].get()
-                txt = w['text'].get().strip()
+                txt = escape_html_text(w['text'].get().strip())
                 if txt: html_parts.append(f"<{lvl}>{txt}</{lvl}>")
             elif btype == 'paragraph':
                 txt = w['text'].get("1.0", tk.END).strip()
                 if txt:
-                    formatted_p = txt.replace('\n\n', '</p><p>').replace('\n', '<br>')
+                    formatted_p = escape_html_text(txt).replace('\n\n', '</p><p>').replace('\n', '<br>')
                     html_parts.append(f"<p>{formatted_p}</p>")
             elif btype == 'image':
                 path = w['path'].get().strip()
@@ -1112,8 +1185,10 @@ class ContentBlockEditor(ttk.LabelFrame):
                     else:
                         final_path = path
 
-                cap_html = f"<figcaption style=\"text-align: center; font-size: 0.9rem; color: #64748b; margin-top: 8px;\">{caption}</figcaption>" if caption else ""
-                html_parts.append(f"<figure style=\"max-width: {img_width}; {margin_css}\"><img src=\"{final_path}\" alt=\"{caption}\" style=\"width:100%; {max_h_css} border-radius:12px; display:block;\">{cap_html}</figure>")
+                cap_escaped = escape_html_text(caption)
+                cap_attr = escape_html_attr(caption)
+                cap_html = f"<figcaption style=\"text-align: center; font-size: 0.9rem; color: #64748b; margin-top: 8px;\">{cap_escaped}</figcaption>" if caption else ""
+                html_parts.append(f"<figure style=\"max-width: {img_width}; {margin_css}\"><img src=\"{escape_html_attr(final_path)}\" alt=\"{cap_attr}\" style=\"width:100%; {max_h_css} border-radius:12px; display:block;\">{cap_html}</figure>")
 
             elif btype == 'youtube':
                 raw_url = w['url'].get().strip()
@@ -1126,7 +1201,7 @@ class ContentBlockEditor(ttk.LabelFrame):
         <iframe src="https://www.youtube-nocookie.com/embed/{yt_id}?rel=0&enablejsapi=1" 
                 title="YouTube video player" 
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                referrerpolicy="no-referrer"
+                referrerpolicy="no-referrer" 
                 allowfullscreen></iframe>
     </div>
 </div>""")
@@ -1154,9 +1229,11 @@ class ContentBlockEditor(ttk.LabelFrame):
                                 final_p = f"../../images/{os.path.basename(p)}"
                             else:
                                 final_p = p
-                        c_html = f"<figcaption style=\"font-size: 0.85rem; color: #64748b; margin-top: 6px; text-align: center;\">{c}</figcaption>" if c else ""
+                        c_escaped = escape_html_text(c)
+                        c_attr = escape_html_attr(c)
+                        c_html = f"<figcaption style=\"font-size: 0.85rem; color: #64748b; margin-top: 6px; text-align: center;\">{c_escaped}</figcaption>" if c else ""
                         grid_items_html.append(f"""<figure style="margin:0; text-align:center;">
-    <img src="{final_p}" alt="{c}" style="width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:12px; display:block;">
+    <img src=\"{escape_html_attr(final_p)}\" alt=\"{c_attr}\" style="width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:12px; display:block;">
     {c_html}
 </figure>""")
                     elif itype == 'youtube':
@@ -1168,7 +1245,7 @@ class ContentBlockEditor(ttk.LabelFrame):
         <iframe src="https://www.youtube-nocookie.com/embed/{yt_id}?rel=0&enablejsapi=1" 
                 title="YouTube video player" 
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                referrerpolicy="no-referrer"
+                referrerpolicy="no-referrer" 
                 allowfullscreen></iframe>
     </div>
 </div>""")
@@ -1183,7 +1260,7 @@ class ContentBlockEditor(ttk.LabelFrame):
 
             elif btype == 'callout':
                 icon = w['icon'].get().strip()
-                txt = w['text'].get().strip()
+                txt = escape_html_text(w['text'].get().strip())
                 if txt:
                     html_parts.append(f"""<div class="callout"><span class="callout-icon">{icon}</span><div>{txt}</div></div>""")
         return "\n\n".join(html_parts)
@@ -1278,15 +1355,6 @@ class GitHubAutoUpdater:
         self.config_path = os.path.join(os.path.dirname(self.script_path), "updater_config.json")
         self.repo = self._load_repo()
 
-    def _load_repo(self):
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data.get("repo", DEFAULT_GITHUB_REPO)
-            except Exception:
-                pass
-        return DEFAULT_GITHUB_REPO
 
     ALLOWED_UPDATE_DOMAINS = {
         "github.com",
@@ -1297,7 +1365,8 @@ class GitHubAutoUpdater:
 
     @staticmethod
     def _get_ssl_context():
-        """Windows ve Linux sistemlerde SSL kök sertifikalarını güvenle yükler"""
+        """Windows ve Linux sistemlerde SSL kök sertifikalarını güvenle yükler.
+        TLS doğrulaması başarısız olursa güvensiz context'e düşmez (fail-closed)."""
         try:
             import certifi
             return ssl.create_default_context(cafile=certifi.where())
@@ -1306,8 +1375,10 @@ class GitHubAutoUpdater:
         try:
             return ssl.create_default_context()
         except Exception:
-            pass
-        return ssl._create_unverified_context()
+            raise RuntimeError(
+                "SSL/TLS güvenlik bağlamı oluşturulamadı. "
+                "Güncelleme için 'pip install certifi' ile sertifika paketini yükleyin."
+            )
 
     def _is_safe_download_url(self, url):
         """İndirme adresinin sadece resmi GitHub HTTPS alan adlarına ait olduğunu doğrular"""
@@ -1318,7 +1389,7 @@ class GitHubAutoUpdater:
             host = parsed.netloc.lower().split(':')[0]
             if host in self.ALLOWED_UPDATE_DOMAINS:
                 return True
-            if host.endswith(".github.com") or host.endswith(".githubusercontent.com") or host.endswith(".amazonaws.com"):
+            if host.endswith(".github.com") or host.endswith(".githubusercontent.com"):
                 return True
             return False
         except Exception:
@@ -1585,7 +1656,27 @@ class MicroLabEditorApp(tk.Tk):
         self.live_preview_opened = False
         self.guide_images = []
         
-        self.preview_temp_path = os.path.join(tempfile.gettempdir(), "microlab_live_preview.html")
+        # PREVIEW RUNTIME SESSION (ISOLATED & REVISION-AWARE)
+        if PreviewRuntimeSession:
+            self.preview_session = PreviewRuntimeSession(sync_enabled=self.auto_sync_var.get())
+            self.preview_temp_path = self.preview_session.html_path
+        else:
+            self.preview_session = None
+            self.preview_temp_path = os.path.join(tempfile.gettempdir(), f"microlab_live_preview_{os.getpid()}.html")
+
+        def _on_sync_toggled(*_):
+            if self.preview_session:
+                self.preview_session.set_sync_enabled(self.auto_sync_var.get())
+        self.auto_sync_var.trace_add("write", _on_sync_toggled)
+
+        def _on_app_close():
+            if self.preview_session:
+                try:
+                    self.preview_session.cleanup()
+                except Exception:
+                    pass
+            self.destroy()
+        self.protocol("WM_DELETE_WINDOW", _on_app_close)
 
         self.existing_people_names = [
             "Dr. Alex Mercer",
@@ -2230,13 +2321,13 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         ttk.Label(lf_info, text="• Canlı önizleme %100 dahili CSS/JS içerir ve herhangi bir bilgisayarda dış dosya olmadan kusursuz çalışır.\n• Üretim esnasında kaydedilecek hedef klasör sorulur.", font=('Inter', 8), wraplength=280).pack(anchor="w", padx=10, pady=5)
 
     def select_proj_cover(self):
-        p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.webp;*.svg")])
+        p = filedialog.askopenfilename(filetypes=IMAGE_FILETYPES)
         if p:
             self.proj_cover_path = p
             self.proj_cover_label.configure(text=os.path.basename(p))
 
     def select_person_photo(self):
-        p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.webp;*.svg")])
+        p = filedialog.askopenfilename(filetypes=IMAGE_FILETYPES)
         if p:
             self.person_photo_path = p
             self.person_photo_label.configure(text=os.path.basename(p))
@@ -2737,34 +2828,16 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
             self.proj_short_desc_text.delete("1.0", tk.END)
             self.proj_short_desc_text.insert("1.0", short_desc)
 
-            img_uri = meta.get("image", "")
+            img_uri = meta.get("image", "") or meta.get("cover", "")
             self.proj_cover_path = ""
             if img_uri:
                 target_dir = self.output_dir_var.get()
-                resolved = None
-                img_name = os.path.basename(img_uri)
-                candidates = []
-                if file_path:
-                    file_dir = os.path.dirname(file_path)
-                    candidates.extend([
-                        os.path.normpath(os.path.join(file_dir, img_uri)),
-                        os.path.normpath(os.path.join(file_dir, "..", "..", "images", img_name)),
-                        os.path.normpath(os.path.join(file_dir, "..", "images", img_name)),
-                    ])
-                if target_dir:
-                    candidates.extend([
-                        os.path.normpath(os.path.join(target_dir, "images", img_name)),
-                        os.path.normpath(os.path.join(target_dir, img_name))
-                    ])
-                for c in candidates:
-                    if os.path.exists(c):
-                        resolved = c
-                        break
-                if resolved:
+                resolved = rehydrate_media_path(img_uri, html_file_path=file_path, website_root=target_dir)
+                if resolved and os.path.exists(resolved):
                     self.proj_cover_path = resolved
                     self.proj_cover_label.configure(text=f"✓ {os.path.basename(resolved)}")
                 else:
-                    self.proj_cover_label.configure(text=f"Kayıtlı: {img_name}")
+                    self.proj_cover_label.configure(text=f"Kayıtlı: {os.path.basename(img_uri)}")
             else:
                 self.proj_cover_label.configure(text="Henüz görsel seçilmedi")
 
@@ -2814,6 +2887,7 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
 
             blocks_data = meta.get("blocks")
             if blocks_data and isinstance(blocks_data, list) and len(blocks_data) > 0:
+                blocks_data = rehydrate_blocks_data(blocks_data, html_file_path=file_path, website_root=self.output_dir_var.get())
                 self.content_editor.load_blocks_data(blocks_data)
             else:
                 self.content_editor.clear_blocks()
@@ -2877,30 +2951,12 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
             self.person_photo_path = ""
             if photo_uri:
                 target_dir = self.output_dir_var.get()
-                img_name = os.path.basename(photo_uri)
-                resolved = None
-                candidates = []
-                if file_path:
-                    file_dir = os.path.dirname(file_path)
-                    candidates.extend([
-                        os.path.normpath(os.path.join(file_dir, photo_uri)),
-                        os.path.normpath(os.path.join(file_dir, "..", "..", "images", img_name)),
-                        os.path.normpath(os.path.join(file_dir, "..", "images", img_name)),
-                    ])
-                if target_dir:
-                    candidates.extend([
-                        os.path.normpath(os.path.join(target_dir, "images", img_name)),
-                        os.path.normpath(os.path.join(target_dir, img_name))
-                    ])
-                for c in candidates:
-                    if os.path.exists(c):
-                        resolved = c
-                        break
-                if resolved:
+                resolved = rehydrate_media_path(photo_uri, html_file_path=file_path, website_root=target_dir)
+                if resolved and os.path.exists(resolved):
                     self.person_photo_path = resolved
                     self.person_photo_label.configure(text=f"✓ {os.path.basename(resolved)}")
                 else:
-                    self.person_photo_label.configure(text=f"Kayıtlı: {img_name}")
+                    self.person_photo_label.configure(text=f"Kayıtlı: {os.path.basename(photo_uri)}")
             else:
                 self.person_photo_label.configure(text="İsteğe bağlı")
 
@@ -2979,6 +3035,7 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
 
             blocks_data = meta.get("blocks") or meta.get("content_blocks")
             if blocks_data and isinstance(blocks_data, list) and len(blocks_data) > 0:
+                blocks_data = rehydrate_blocks_data(blocks_data, html_file_path=file_path, website_root=self.output_dir_var.get())
                 self.news_content_editor.load_blocks_data(blocks_data)
             else:
                 self.news_content_editor.clear_blocks()
@@ -3341,18 +3398,32 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         os.makedirs(projects_data_dir, exist_ok=True)
         os.makedirs(images_dir, exist_ok=True)
 
-        cover_uri = "../../images/project_drone.svg"
-        if self.proj_cover_path and os.path.exists(self.proj_cover_path):
-            filename = os.path.basename(self.proj_cover_path)
-            shutil.copy2(self.proj_cover_path, os.path.join(images_dir, filename))
-            cover_uri = f"../../images/{filename}"
+        output_file_path = os.path.join(projects_data_dir, f"{slug}.html")
+        if os.path.exists(output_file_path) and output_file_path != self.loaded_file_paths.get(0):
+            if not messagebox.askyesno(
+                "Dosya Çakışması Uyarısı",
+                f"'{slug}.html' adlı proje dosyası hedef klasörde zaten mevcut!\n\n"
+                "Var olan dosyanın üzerine yazmak istiyor musunuz?"
+            ):
+                return
 
+        cover_uri = "../../images/project_drone.svg"
+        if self.proj_cover_path:
+            saved_name = safe_copy_media_file(self.proj_cover_path, images_dir)
+            if saved_name:
+                cover_uri = f"../../images/{saved_name}"
+            elif self.proj_cover_path.startswith(('http://', 'https://', '../../images/')):
+                cover_uri = self.proj_cover_path
+
+        saved_block_images = {}
         def copy_block_image(src_path):
-            if not src_path or not os.path.exists(src_path):
+            if not src_path:
                 return src_path
-            filename = os.path.basename(src_path)
-            shutil.copy2(src_path, os.path.join(images_dir, filename))
-            return f"../../images/{filename}"
+            saved_name = safe_copy_media_file(src_path, images_dir)
+            if saved_name:
+                saved_block_images[src_path] = saved_name
+                return f"../../images/{saved_name}"
+            return src_path
 
         body_html = self.content_editor.render_html(media_copy_callback=copy_block_image)
 
@@ -3363,7 +3434,8 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
                 val = combo.get().strip()
                 if val and val not in team_names:
                     team_names.append(val)
-                    team_members_html_parts.append(f'<div class="member-card" style="padding:15px; background:var(--bg-alt); border-radius:8px;"><h3 style="font-size:1.1rem; color:#2563eb;">{val}</h3></div>')
+                    escaped_val = escape_html_text(val)
+                    team_members_html_parts.append(f'<div class="member-card" style="padding:15px; background:var(--bg-alt); border-radius:8px;"><h3 style="font-size:1.1rem; color:#2563eb;">{escaped_val}</h3></div>')
             except Exception: pass
 
         team_html = "\n".join(team_members_html_parts) if team_members_html_parts else '<p style="color:#64748b;">No members listed.</p>'
@@ -3379,15 +3451,25 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
 
         pub_section_html = ""
         if pub_list:
-            items_h = "\n".join([f"                    <li><a href='{p['link']}'>{p['title']}</a></li>" if p['link'] else f"                    <li>{p['title']}</li>" for p in pub_list])
+            items_h_parts = []
+            for p in pub_list:
+                p_t = escape_html_text(p['title'])
+                p_l = sanitize_url_for_href(p['link'])
+                if p['link'] and is_safe_url(p['link']):
+                    items_h_parts.append(f"                    <li><a href='{p_l}' target='_blank'>{p_t}</a></li>")
+                else:
+                    items_h_parts.append(f"                    <li>{p_t}</li>")
+            items_h = "\n".join(items_h_parts)
             pub_section_html = f"<h2>Related Publications</h2>\n<div class='related-pubs-container' style='margin-top:0;'>\n<ul class='related-pubs-list'>\n{items_h}\n</ul>\n</div>"
 
-        header_style = f"background-image: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.85)), url('{cover_uri}');"
-        timeline = f"{start_date} &mdash; <span style=\"color: #38a169;\">Active</span>" if status == "Active" else f"{start_date} &mdash; {end_date}"
+        header_style = f"background-image: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.85)), url('{escape_html_attr(cover_uri)}');"
+        timeline = f"{escape_html_text(start_date)} &mdash; <span style=\"color: #38a169;\">Active</span>" if status == "Active" else f"{escape_html_text(start_date)} &mdash; {escape_html_text(end_date)}"
         
         project_meta_html = f"""<div class="project-meta" style="margin-bottom: 25px; font-size: 0.95rem; color: #475569; background: var(--bg-alt); padding: 15px; border-left: 4px solid #2563eb; border-radius: 8px;">
-            <strong>Timeline:</strong> {timeline} <span style="margin: 0 10px;">|</span> <strong>Status:</strong> {status}
+            <strong>Timeline:</strong> {timeline} <span style="margin: 0 10px;">|</span> <strong>Status:</strong> {escape_html_text(status)}
         </div>"""
+
+        portable_blocks = make_portable_blocks_data(self.content_editor.get_blocks_data(), saved_block_images)
 
         metadata_dict = {
             "title": title,
@@ -3402,10 +3484,10 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
             "image": cover_uri,
             "team": team_names,
             "publications": pub_list,
-            "blocks": self.content_editor.get_blocks_data()
+            "blocks": portable_blocks
         }
 
-        html = PROJECT_HTML_TEMPLATE.replace("{{TITLE}}", title)
+        html = PROJECT_HTML_TEMPLATE.replace("{{TITLE}}", escape_html_text(title))
         html = html.replace("{{HEADER_STYLE}}", header_style)
         html = html.replace("{{PROJECT_META_HTML}}", project_meta_html)
         html = html.replace("{{CONTENT_BODY_HTML}}", body_html)
@@ -3416,7 +3498,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         html = html.replace("{{EMBEDDED_JS}}", EMBEDDED_JS_CONTENT)
         html = html.replace("{{METADATA_JSON}}", json.dumps(metadata_dict, ensure_ascii=False, indent=2))
 
-        output_file_path = os.path.join(projects_data_dir, f"{slug}.html")
         with open(output_file_path, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -3425,6 +3506,8 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         self.loaded_titles[0] = title
         if hasattr(self, 'proj_loaded_badge'):
             self.proj_loaded_badge.configure(text=f"✓ Kaydedildi: {os.path.basename(output_file_path)}")
+
+        messagebox.showinfo("Başarılı", f"Proje sayfası başarıyla kaydedildi!\n\nKaydedilen Konum:\n{output_file_path}")
 
         messagebox.showinfo("Başarılı", f"Proje sayfası başarıyla kaydedildi!\n\nKaydedilen Konum:\n{output_file_path}")
 
@@ -3457,11 +3540,22 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         os.makedirs(people_data_dir, exist_ok=True)
         os.makedirs(images_dir, exist_ok=True)
 
+        output_file_path = os.path.join(people_data_dir, f"{slug}.html")
+        if os.path.exists(output_file_path) and output_file_path != self.loaded_file_paths.get(1):
+            if not messagebox.askyesno(
+                "Dosya Çakışması Uyarısı",
+                f"'{slug}.html' adlı kişi profili hedef klasörde zaten mevcut!\n\n"
+                "Var olan dosyanın üzerine yazmak istiyor musunuz?"
+            ):
+                return
+
         photo_uri = ""
-        if self.person_photo_path and os.path.exists(self.person_photo_path):
-            filename = os.path.basename(self.person_photo_path)
-            shutil.copy2(self.person_photo_path, os.path.join(images_dir, filename))
-            photo_uri = f"../../images/{filename}"
+        if self.person_photo_path:
+            saved_name = safe_copy_media_file(self.person_photo_path, images_dir)
+            if saved_name:
+                photo_uri = f"../../images/{saved_name}"
+            elif self.person_photo_path.startswith(('http://', 'https://', '../../images/')):
+                photo_uri = self.person_photo_path
 
         metadata_dict = {
             "name": name,
@@ -3481,16 +3575,19 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         }
 
         social_links_html = generate_person_social_links_html(metadata_dict)
-        about_html = f"<p>{about}</p>" if about else "<p>MICROLab team researcher.</p>"
-        photo_html = f'<img src="{photo_uri}" alt="{name}" style="width:100%;height:100%;object-fit:cover;">' if photo_uri else ""
+        about_escaped = escape_html_text(about).replace('\n\n', '</p><p>').replace('\n', '<br>')
+        about_html = f"<p>{about_escaped}</p>" if about else "<p>MICROLab team researcher.</p>"
+        photo_html = f'<img src="{escape_html_attr(photo_uri)}" alt="{escape_html_attr(name)}" style="width:100%;height:100%;object-fit:cover;">' if photo_uri else ""
 
-        html = PERSON_HTML_TEMPLATE.replace("{{NAME}}", name)
-        html = html.replace("{{ROLE}}", role)
-        html = html.replace("{{DEPARTMENT}}", department)
+        html = PERSON_HTML_TEMPLATE.replace("{{NAME}}", escape_html_text(name))
+        html = html.replace("{{ROLE}}", escape_html_text(role))
+        html = html.replace("{{DEPARTMENT}}", escape_html_text(department))
         html = html.replace("{{PHOTO_HTML}}", photo_html)
         html = html.replace("{{SOCIAL_LINKS_HTML}}", social_links_html)
-        github_html = f'<a href="{github}" target="_blank" class="social-link-btn github">GitHub</a>' if github else ""
-        linkedin_html = f'<a href="{linkedin}" target="_blank" class="social-link-btn linkedin">LinkedIn</a>' if linkedin else ""
+        github_safe = sanitize_url_for_href(github)
+        linkedin_safe = sanitize_url_for_href(linkedin)
+        github_html = f'<a href="{github_safe}" target="_blank" class="social-link-btn github">GitHub</a>' if github and is_safe_url(github) else ""
+        linkedin_html = f'<a href="{linkedin_safe}" target="_blank" class="social-link-btn linkedin">LinkedIn</a>' if linkedin and is_safe_url(linkedin) else ""
         html = html.replace("{{GITHUB_LINK_HTML}}", github_html)
         html = html.replace("{{LINKEDIN_LINK_HTML}}", linkedin_html)
         html = html.replace("{{ABOUT_HTML}}", about_html)
@@ -3499,7 +3596,6 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         html = html.replace("{{EMBEDDED_JS}}", EMBEDDED_JS_CONTENT)
         html = html.replace("{{METADATA_JSON}}", json.dumps(metadata_dict, ensure_ascii=False, indent=2))
 
-        output_file_path = os.path.join(people_data_dir, f"{slug}.html")
         with open(output_file_path, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -3536,14 +3632,27 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         os.makedirs(news_data_dir, exist_ok=True)
         os.makedirs(images_dir, exist_ok=True)
 
+        output_file_path = os.path.join(news_data_dir, f"{slug}.html")
+        if os.path.exists(output_file_path) and output_file_path != self.loaded_file_paths.get(2):
+            if not messagebox.askyesno(
+                "Dosya Çakışması Uyarısı",
+                f"'{slug}.html' adlı haber dosyası hedef klasörde zaten mevcut!\n\n"
+                "Var olan dosyanın üzerine yazmak istiyor musunuz?"
+            ):
+                return
+
+        saved_news_images = {}
         def copy_block_image(src_path):
-            if not src_path or not os.path.exists(src_path):
+            if not src_path:
                 return src_path
-            filename = os.path.basename(src_path)
-            shutil.copy2(src_path, os.path.join(images_dir, filename))
-            return f"../../images/{filename}"
+            saved_name = safe_copy_media_file(src_path, images_dir)
+            if saved_name:
+                saved_news_images[src_path] = saved_name
+                return f"../../images/{saved_name}"
+            return src_path
 
         body_html = self.news_content_editor.render_html(media_copy_callback=copy_block_image)
+        portable_blocks = make_portable_blocks_data(self.news_content_editor.get_blocks_data(), saved_news_images)
 
         metadata_dict = {
             "title": title,
@@ -3551,19 +3660,18 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
             "date": date_str,
             "category": category,
             "short_description": summary,
-            "blocks": self.news_content_editor.get_blocks_data()
+            "blocks": portable_blocks
         }
 
-        html = NEWS_HTML_TEMPLATE.replace("{{TITLE}}", title)
-        html = html.replace("{{DATE}}", date_str)
-        html = html.replace("{{CATEGORY}}", category)
+        html = NEWS_HTML_TEMPLATE.replace("{{TITLE}}", escape_html_text(title))
+        html = html.replace("{{DATE}}", escape_html_text(date_str))
+        html = html.replace("{{CATEGORY}}", escape_html_text(category))
         html = html.replace("{{CONTENT_BODY_HTML}}", body_html)
         html = html.replace("{{LIVE_RELOAD_SCRIPT}}", "")
         html = html.replace("{{EMBEDDED_CSS}}", EMBEDDED_CSS_CONTENT)
         html = html.replace("{{EMBEDDED_JS}}", EMBEDDED_JS_CONTENT)
         html = html.replace("{{METADATA_JSON}}", json.dumps(metadata_dict, ensure_ascii=False, indent=2))
 
-        output_file_path = os.path.join(news_data_dir, f"{slug}.html")
         with open(output_file_path, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -3606,12 +3714,24 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         for key, val, label in link_specs:
             if val:
                 links_dict[key] = val
-                links_html_parts.append(f'<a href="{val}" class="pub-link-btn" target="_blank" style="color:#2563eb; font-weight:600; margin-right:10px;">{label}</a>')
+                safe_val = sanitize_url_for_href(val)
+                label_esc = escape_html_text(label)
+                if is_safe_url(val):
+                    links_html_parts.append(f'<a href="{safe_val}" class="pub-link-btn" target="_blank" style="color:#2563eb; font-weight:600; margin-right:10px;">{label_esc}</a>')
 
         links_html = f'<div class="pub-links">{" ".join(links_html_parts)}</div>' if links_html_parts else ""
 
         pub_data_dir = os.path.join(target_base_dir, "publications", "data")
         os.makedirs(pub_data_dir, exist_ok=True)
+
+        output_file_path = os.path.join(pub_data_dir, f"{slug}.html")
+        if os.path.exists(output_file_path) and output_file_path != self.loaded_file_paths.get(3):
+            if not messagebox.askyesno(
+                "Dosya Çakışması Uyarısı",
+                f"'{slug}.html' adlı yayın dosyası hedef klasörde zaten mevcut!\n\n"
+                "Var olan dosyanın üzerine yazmak istiyor musunuz?"
+            ):
+                return
 
         metadata_dict = {
             "title": title,
@@ -3623,17 +3743,16 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
             "links": links_dict
         }
 
-        html = PUBLICATION_HTML_TEMPLATE.replace("{{TITLE}}", title)
-        html = html.replace("{{AUTHORS}}", authors)
-        html = html.replace("{{VENUE}}", venue)
-        html = html.replace("{{YEAR}}", year)
+        html = PUBLICATION_HTML_TEMPLATE.replace("{{TITLE}}", escape_html_text(title))
+        html = html.replace("{{AUTHORS}}", escape_html_text(authors))
+        html = html.replace("{{VENUE}}", escape_html_text(venue))
+        html = html.replace("{{YEAR}}", escape_html_text(year))
         html = html.replace("{{LINKS_HTML}}", links_html)
         html = html.replace("{{LIVE_RELOAD_SCRIPT}}", "")
         html = html.replace("{{EMBEDDED_CSS}}", EMBEDDED_CSS_CONTENT)
         html = html.replace("{{EMBEDDED_JS}}", EMBEDDED_JS_CONTENT)
         html = html.replace("{{METADATA_JSON}}", json.dumps(metadata_dict, ensure_ascii=False, indent=2))
 
-        output_file_path = os.path.join(pub_data_dir, f"{slug}.html")
         with open(output_file_path, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -3647,26 +3766,30 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
 
     def render_live_html(self):
         curr_tab = self.notebook.index(self.notebook.select())
+        if curr_tab == 4:
+            return ""
+
+        html = ""
 
         def preview_media_url(p):
             if not p:
                 return get_svg_placeholder("Görsel Seçilmedi")
-            if p.startswith(('http://', 'https://', 'file:///', 'data:image/')):
+            if p.startswith(('http://', 'https://', 'data:image/')):
                 return p
-            abs_p = os.path.abspath(p).replace('\\', '/')
-            return f"file:///{abs_p}"
+            target_dir = self.output_dir_var.get()
+            resolved = rehydrate_media_path(
+                p,
+                html_file_path=self.loaded_file_paths.get(curr_tab),
+                website_root=target_dir
+            )
+            if resolved and os.path.exists(resolved):
+                return path_to_file_uri(resolved)
+            return get_svg_placeholder("Görsel Bulunamadı")
 
-        live_reload_html = """
-        <div id="livePreviewBanner" style="position: fixed; bottom: 15px; right: 15px; z-index: 99999; background: #0f172a; color: #38bdf8; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; padding: 10px 18px; border-radius: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #1e293b; display: flex; align-items: center; gap: 8px;">
-            <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
-            MICROLab Live Preview (Otomatik Yenileniyor)
-        </div>
-        <script>
-            setTimeout(() => {
-                window.location.reload();
-            }, 3000);
-        </script>
-        """
+        if self.preview_session:
+            live_reload_html = self.preview_session.generate_live_reload_snippet()
+        else:
+            live_reload_html = ""
 
         if curr_tab == 0: # Project
             title = self.proj_title_entry.get().strip() or "Untitled Project"
@@ -3838,25 +3961,62 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
 
         return html
 
-    def open_live_preview(self):
-        html = self.render_live_html()
+    def _write_preview_html(self, html):
+        """Atomically writes live preview HTML to prevent browser partial read collisions."""
+        tmp_path = self.preview_temp_path + ".tmp"
         try:
-            with open(self.preview_temp_path, 'w', encoding='utf-8') as f:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 f.write(html)
+            os.replace(tmp_path, self.preview_temp_path)
+        except Exception:
+            try:
+                with open(self.preview_temp_path, 'w', encoding='utf-8') as f:
+                    f.write(html)
+            except Exception:
+                pass
+
+    def open_live_preview(self):
+        curr_tab = self.notebook.index(self.notebook.select())
+        if curr_tab == 4:
+            messagebox.showinfo(
+                "Önizleme Bilgisi",
+                "Kılavuz / Yardım sekmesindesiniz.\n\n"
+                "Canlı önizleme yapabilmek için lütfen Proje, Kişi, Haber veya Yayın sekmelerinden birini seçin."
+            )
+            return
+
+        try:
+            html = self.render_live_html()
+            if not html:
+                return
+            if self.preview_session:
+                self.preview_session.update_content_if_changed(lambda: html, force=True)
+                target_path = self.preview_session.html_path
+            else:
+                self._write_preview_html(html)
+                target_path = self.preview_temp_path
+
             self.live_preview_opened = True
-            webbrowser.open(f"file:///{self.preview_temp_path.replace(chr(92), '/')}")
+            preview_uri = path_to_file_uri(target_path)
+            webbrowser.open(preview_uri)
         except Exception as e:
             messagebox.showerror("Hata", f"Canlı önizleme açılamadı: {e}")
 
     def auto_update_preview_loop(self):
         if self.live_preview_opened and self.auto_sync_var.get():
             try:
-                html = self.render_live_html()
-                with open(self.preview_temp_path, 'w', encoding='utf-8') as f:
-                    f.write(html)
-            except Exception: pass
+                curr_tab = self.notebook.index(self.notebook.select())
+                if curr_tab != 4:
+                    html = self.render_live_html()
+                    if html:
+                        if self.preview_session:
+                            self.preview_session.update_content_if_changed(lambda: html, force=False)
+                        else:
+                            self._write_preview_html(html)
+            except Exception:
+                pass
         
-        self.after(2500, self.auto_update_preview_loop)
+        self.after(2000, self.auto_update_preview_loop)
 
 # Geriye donuk uyumluluk takma adi (Backward compatibility alias)
 StandaloneProjectCreatorApp = MicroLabEditorApp
