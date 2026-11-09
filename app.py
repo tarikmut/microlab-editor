@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MICROLab Editor v1.0.2 (100% Independent)
+MICROLab Editor v1.0.3 (100% Independent)
 =========================================
 Tamamen Bağımsız (Standalone) Web Sitesi İçerik Yönetim ve Üretim Editörü.
 - Canlı önizleme %100 dahili CSS ve JS içerir (Dış dosya yolu gerektirmez).
@@ -18,6 +18,9 @@ import os
 import sys
 import re
 import json
+import html
+import time
+import uuid
 import shutil
 import tempfile
 import webbrowser
@@ -25,15 +28,18 @@ import datetime
 import subprocess
 import threading
 import hashlib
+import base64
+import mimetypes
 import ssl
 import urllib.request
 import urllib.error
+from pathlib import Path
 from urllib.parse import urlparse
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 # APP VERSION & REPO CONFIG
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 DEFAULT_GITHUB_REPO = "tarikmut/microlab-editor"
 
 try:
@@ -42,57 +48,436 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-# CROSS-PLATFORM MEDIA & SECURITY HELPERS
-try:
-    from media_portability import (
-        IMAGE_FILETYPES,
-        HTML_FILETYPES,
-        path_to_file_uri,
-        safe_copy_media_file,
-        rehydrate_media_path,
-        rehydrate_blocks_data,
-        make_portable_blocks_data,
-        escape_html_text,
-        escape_html_attr,
-        is_safe_url,
-        sanitize_url_for_href
-    )
-except ImportError:
-    try:
-        from .media_portability import (
-            IMAGE_FILETYPES,
-            HTML_FILETYPES,
-            path_to_file_uri,
-            safe_copy_media_file,
-            rehydrate_media_path,
-            rehydrate_blocks_data,
-            make_portable_blocks_data,
-            escape_html_text,
-            escape_html_attr,
-            is_safe_url,
-            sanitize_url_for_href
-        )
-    except Exception:
-        IMAGE_FILETYPES = [
-            ("Görseller", ("*.png", "*.PNG", "*.jpg", "*.JPG", "*.jpeg", "*.JPEG",
-                           "*.webp", "*.WEBP", "*.svg", "*.SVG",
-                           "*.gif", "*.GIF", "*.bmp", "*.BMP",
-                           "*.tiff", "*.TIFF", "*.tif", "*.TIF",
-                           "*.heic", "*.HEIC", "*.heif", "*.HEIF")),
-            ("Tüm Dosyalar", "*")
-        ]
-        HTML_FILETYPES = [
-            ("MICROLab HTML Dosyaları", ("*.html", "*.HTML", "*.htm", "*.HTM")),
-            ("Tüm Dosyalar", "*")
-        ]
+# Ensure script directory is always in sys.path
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
 
-try:
-    from preview_runtime import PreviewRuntimeSession
-except ImportError:
+# ==============================================================================
+# CROSS-PLATFORM MEDIA & SECURITY ENGINE (100% STANDALONE EMBEDDED)
+# ==============================================================================
+
+IMAGE_FILETYPES = [
+    (
+        "Görseller / Images",
+        (
+            "*.png", "*.PNG",
+            "*.jpg", "*.JPG",
+            "*.jpeg", "*.JPEG",
+            "*.webp", "*.WEBP",
+            "*.svg", "*.SVG",
+            "*.gif", "*.GIF",
+            "*.bmp", "*.BMP",
+            "*.tiff", "*.TIFF",
+            "*.tif", "*.TIF",
+            "*.heic", "*.HEIC",
+            "*.heif", "*.HEIF"
+        )
+    ),
+    ("Tüm Dosyalar / All Files", "*")
+]
+
+HTML_FILETYPES = [
+    ("MICROLab HTML Dosyaları", ("*.html", "*.HTML", "*.htm", "*.HTM")),
+    ("Tüm Dosyalar / All Files", "*")
+]
+
+
+def path_to_file_uri(path_str):
+    """Converts a file system path to a valid file:// URI without 4-slash bugs."""
+    if not path_str:
+        return ""
+    if path_str.startswith(('http://', 'https://', 'data:image/')):
+        return path_str
     try:
-        from .preview_runtime import PreviewRuntimeSession
+        return Path(path_str).resolve().as_uri()
     except Exception:
-        PreviewRuntimeSession = None
+        resolved = os.path.abspath(path_str).replace('\\', '/')
+        if not resolved.startswith('/'):
+            resolved = '/' + resolved
+        from urllib.parse import quote
+        parts = resolved.split('/')
+        quoted_parts = [quote(p, safe='') for p in parts]
+        return "file://" + '/'.join(quoted_parts)
+
+
+def file_to_data_uri(file_path):
+    """
+    Converts a local image file to a base64 Data URI for cross-platform browser preview.
+    Bypasses macOS Safari and Chrome local file cross-origin restrictions on file:// URLs.
+    """
+    if not file_path:
+        return ""
+    try:
+        p = Path(file_path).resolve()
+        if not p.is_file():
+            return ""
+        ext = p.suffix.lower()
+        mime_map = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.bmp': 'image/bmp',
+            '.ico': 'image/x-icon',
+            '.tiff': 'image/tiff',
+            '.tif': 'image/tiff'
+        }
+        mime_type = mime_map.get(ext)
+        if not mime_type:
+            mime_type, _ = mimetypes.guess_type(str(p))
+        if not mime_type:
+            mime_type = 'image/jpeg'
+        with open(p, 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode('ascii')
+        return f"data:{mime_type};base64,{encoded}"
+    except Exception:
+        return ""
+
+
+def calculate_file_hash(file_path):
+    """Calculates SHA-256 hash of a file."""
+    h = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def safe_copy_media_file(src_path, images_dir):
+    """Safely copies an image to images_dir avoiding SameFileError and collisions."""
+    if not src_path:
+        return None
+
+    images_dir_path = Path(images_dir).resolve()
+    images_dir_path.mkdir(parents=True, exist_ok=True)
+
+    src_p = Path(src_path)
+    if not src_p.exists():
+        candidate_in_images = images_dir_path / src_p.name
+        if candidate_in_images.exists():
+            return candidate_in_images.name
+        return None
+
+    src_p = src_p.resolve()
+    target_name = src_p.name
+    dest_p = (images_dir_path / target_name).resolve()
+
+    if src_p == dest_p:
+        return target_name
+    try:
+        if dest_p.exists() and src_p.samefile(dest_p):
+            return target_name
+    except (OSError, ValueError):
+        pass
+
+    if dest_p.exists():
+        try:
+            h_src = calculate_file_hash(src_p)
+            h_dest = calculate_file_hash(dest_p)
+            if h_src == h_dest:
+                return target_name
+            else:
+                target_name = f"{src_p.stem}_{h_src[:8]}{src_p.suffix}"
+                dest_p = images_dir_path / target_name
+                if dest_p.exists() and calculate_file_hash(dest_p) == h_src:
+                    return target_name
+        except Exception:
+            pass
+
+    shutil.copy2(str(src_p), str(dest_p))
+    return target_name
+
+
+def rehydrate_media_path(path_or_uri, html_file_path=None, website_root=None):
+    """Rehydrates remote or relative paths to current machine."""
+    if not path_or_uri or str(path_or_uri).startswith(('http://', 'https://', 'data:image/')):
+        return path_or_uri
+
+    raw_path = str(path_or_uri).strip()
+    try:
+        if os.path.exists(raw_path):
+            return str(Path(raw_path).resolve())
+    except Exception:
+        pass
+
+    basename = os.path.basename(raw_path.replace('\\', '/'))
+    if not basename:
+        return raw_path
+
+    candidates = []
+    if html_file_path:
+        doc_dir = Path(html_file_path).resolve().parent
+        clean_rel = raw_path.replace('\\', '/')
+        if clean_rel.startswith('../../') or clean_rel.startswith('../'):
+            candidates.append(doc_dir / clean_rel)
+        candidates.extend([
+            doc_dir / ".." / ".." / "images" / basename,
+            doc_dir / ".." / "images" / basename,
+            doc_dir / "images" / basename,
+            doc_dir / basename
+        ])
+
+    if website_root:
+        w_root = Path(website_root).resolve()
+        candidates.extend([
+            w_root / "images" / basename,
+            w_root / basename
+        ])
+
+    for cand in candidates:
+        try:
+            cand_resolved = cand.resolve()
+            if cand_resolved.is_file():
+                return str(cand_resolved)
+        except Exception:
+            continue
+
+    return raw_path
+
+
+def rehydrate_blocks_data(blocks_data, html_file_path=None, website_root=None):
+    """Recursively rehydrates all image and gallery block paths in blocks_data."""
+    if not blocks_data or not isinstance(blocks_data, list):
+        return []
+
+    rehydrated = []
+    for b in blocks_data:
+        if not isinstance(b, dict):
+            rehydrated.append(b)
+            continue
+
+        b_copy = dict(b)
+        btype = b_copy.get('type')
+
+        if btype == 'image' and 'path' in b_copy:
+            b_copy['path'] = rehydrate_media_path(b_copy['path'], html_file_path, website_root)
+
+        elif btype == 'gallery' and 'items' in b_copy and isinstance(b_copy['items'], list):
+            new_items = []
+            for item in b_copy['items']:
+                if isinstance(item, dict) and item.get('type') == 'image' and 'path' in item:
+                    item_copy = dict(item)
+                    item_copy['path'] = rehydrate_media_path(item_copy['path'], html_file_path, website_root)
+                    new_items.append(item_copy)
+                else:
+                    new_items.append(item)
+            b_copy['items'] = new_items
+
+        rehydrated.append(b_copy)
+
+    return rehydrated
+
+
+def make_portable_blocks_data(blocks_data, saved_images_map=None):
+    """Transforms blocks_data so that image paths reference relative project paths."""
+    if not blocks_data or not isinstance(blocks_data, list):
+        return []
+
+    portable = []
+    for b in blocks_data:
+        if not isinstance(b, dict):
+            portable.append(b)
+            continue
+
+        b_copy = dict(b)
+        btype = b_copy.get('type')
+
+        if btype == 'image' and 'path' in b_copy:
+            p = b_copy['path']
+            if saved_images_map and p in saved_images_map:
+                b_copy['path'] = f"../../images/{saved_images_map[p]}"
+            elif p and not p.startswith(('http://', 'https://', '../../images/')):
+                b_copy['path'] = f"../../images/{os.path.basename(p.replace(chr(92), '/'))}"
+
+        elif btype == 'gallery' and 'items' in b_copy and isinstance(b_copy['items'], list):
+            new_items = []
+            for item in b_copy['items']:
+                if isinstance(item, dict) and item.get('type') == 'image' and 'path' in item:
+                    item_copy = dict(item)
+                    p = item_copy['path']
+                    if saved_images_map and p in saved_images_map:
+                        item_copy['path'] = f"../../images/{saved_images_map[p]}"
+                    elif p and not p.startswith(('http://', 'https://', '../../images/')):
+                        item_copy['path'] = f"../../images/{os.path.basename(p.replace(chr(92), '/'))}"
+                    new_items.append(item_copy)
+                else:
+                    new_items.append(item)
+            b_copy['items'] = new_items
+
+        portable.append(b_copy)
+
+    return portable
+
+
+def escape_html_text(text):
+    """Safely escapes text for inclusion in HTML body."""
+    if text is None:
+        return ""
+    return html.escape(str(text))
+
+
+def escape_html_attr(text):
+    """Safely escapes text for inclusion in HTML attributes."""
+    if text is None:
+        return ""
+    return html.escape(str(text), quote=True)
+
+
+def is_safe_url(url):
+    """Validates that a URL uses safe protocols."""
+    if not url:
+        return True
+    u = str(url).strip()
+    if u.startswith(('#', '/', './', '../')):
+        return True
+    parsed = urlparse(u)
+    return parsed.scheme.lower() in ('http', 'https', 'mailto')
+
+
+def sanitize_url_for_href(url):
+    """Returns safe URL for href attribute, or '#' if dangerous."""
+    if not url:
+        return "#"
+    u = str(url).strip()
+    if is_safe_url(u):
+        return escape_html_attr(u)
+    return "#"
+
+
+class PreviewRuntimeSession:
+    """Manages an active, revision-aware, flicker-free preview session."""
+    def __init__(self, sync_enabled=True):
+        self.sync_enabled = bool(sync_enabled)
+        self.revision = 1
+        self.last_content_hash = ""
+        self.last_rendered_html = ""
+
+        pid = os.getpid()
+        unique_token = uuid.uuid4().hex[:8]
+        self.session_dir = os.path.join(tempfile.gettempdir(), f"microlab_preview_{pid}_{unique_token}")
+        os.makedirs(self.session_dir, exist_ok=True)
+
+        self.html_path = os.path.join(self.session_dir, "preview.html")
+        self.state_path = os.path.join(self.session_dir, "preview_state.js")
+        self.write_state_file()
+
+    def write_state_file(self):
+        state_data = {
+            "enabled": self.sync_enabled,
+            "revision": self.revision,
+            "timestamp": time.time()
+        }
+        content = f"window.__MICROLAB_PREVIEW_STATE__ = {json.dumps(state_data, indent=2)};\n"
+        tmp_path = self.state_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, self.state_path)
+        except Exception:
+            try:
+                with open(self.state_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception:
+                pass
+
+    def set_sync_enabled(self, enabled):
+        new_val = bool(enabled)
+        if self.sync_enabled != new_val:
+            self.sync_enabled = new_val
+            self.write_state_file()
+
+    def generate_live_reload_snippet(self, revision=None):
+        rev = self.revision if revision is None else revision
+        initial_dot_color = "#22c55e" if self.sync_enabled else "#94a3b8"
+        initial_text = "MICROLab Live Preview (Otomatik Yenileniyor)" if self.sync_enabled else "MICROLab Live Preview (Duraklatıldı)"
+
+        return f"""
+        <div id="livePreviewBanner" style="position: fixed; bottom: 15px; right: 15px; z-index: 99999; background: #0f172a; color: #38bdf8; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; font-weight: 600; padding: 10px 18px; border-radius: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #1e293b; display: flex; align-items: center; gap: 8px; pointer-events: none; user-select: none;">
+            <span id="livePreviewDot" style="width: 8px; height: 8px; background: {initial_dot_color}; border-radius: 50%; display: inline-block; transition: background 0.3s;"></span>
+            <span id="livePreviewText">{initial_text}</span>
+        </div>
+        <script>
+        (function() {{
+            var myRevision = {rev};
+            var isPolling = false;
+            function pollState() {{
+                if (isPolling) return;
+                isPolling = true;
+                var s = document.createElement("script");
+                s.src = "preview_state.js?t=" + Date.now();
+                s.onload = function() {{
+                    s.remove();
+                    isPolling = false;
+                    if (window.__MICROLAB_PREVIEW_STATE__) {{
+                        var st = window.__MICROLAB_PREVIEW_STATE__;
+                        var dot = document.getElementById("livePreviewDot");
+                        var txt = document.getElementById("livePreviewText");
+                        if (st.enabled) {{
+                            if (dot) dot.style.background = "#22c55e";
+                            if (txt) txt.textContent = "MICROLab Live Preview (Otomatik Yenileniyor)";
+                            if (st.revision > myRevision) {{
+                                window.location.reload();
+                                return;
+                            }}
+                        }} else {{
+                            if (dot) dot.style.background = "#94a3b8";
+                            if (txt) txt.textContent = "MICROLab Live Preview (Duraklatıldı)";
+                        }}
+                    }}
+                    setTimeout(pollState, 900);
+                }};
+                s.onerror = function() {{
+                    s.remove();
+                    isPolling = false;
+                    setTimeout(pollState, 1500);
+                }};
+                document.head.appendChild(s);
+            }}
+            setTimeout(pollState, 900);
+        }})();
+        </script>
+        """
+
+    def write_html_atomic(self, html_content):
+        tmp_path = self.html_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            os.replace(tmp_path, self.html_path)
+        except Exception:
+            with open(self.html_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+    def update_content_if_changed(self, raw_html_generator, force=False):
+        raw_html = raw_html_generator()
+        if not raw_html:
+            return False, ""
+
+        content_hash = hashlib.sha256(raw_html.encode("utf-8")).hexdigest()
+        if not force and content_hash == self.last_content_hash:
+            return False, self.last_rendered_html
+
+        if not force:
+            self.revision += 1
+
+        self.last_content_hash = content_hash
+        snippet = self.generate_live_reload_snippet(self.revision)
+        final_html = raw_html.replace("{{LIVE_RELOAD_SCRIPT}}", snippet)
+        self.last_rendered_html = final_html
+
+        self.write_html_atomic(final_html)
+        self.write_state_file()
+        return True, final_html
+
+    def cleanup(self):
+        try:
+            if os.path.exists(self.session_dir):
+                shutil.rmtree(self.session_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 # YOUTUBE ID EXTRACTOR
 def extract_youtube_id(url):
@@ -2837,6 +3222,7 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
                     self.proj_cover_path = resolved
                     self.proj_cover_label.configure(text=f"✓ {os.path.basename(resolved)}")
                 else:
+                    self.proj_cover_path = resolved or img_uri
                     self.proj_cover_label.configure(text=f"Kayıtlı: {os.path.basename(img_uri)}")
             else:
                 self.proj_cover_label.configure(text="Henüz görsel seçilmedi")
@@ -2956,6 +3342,7 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
                     self.person_photo_path = resolved
                     self.person_photo_label.configure(text=f"✓ {os.path.basename(resolved)}")
                 else:
+                    self.person_photo_path = resolved or photo_uri
                     self.person_photo_label.configure(text=f"Kayıtlı: {os.path.basename(photo_uri)}")
             else:
                 self.person_photo_label.configure(text="İsteğe bağlı")
@@ -3783,6 +4170,9 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
                 website_root=target_dir
             )
             if resolved and os.path.exists(resolved):
+                data_uri = file_to_data_uri(resolved)
+                if data_uri:
+                    return data_uri
                 return path_to_file_uri(resolved)
             return get_svg_placeholder("Görsel Bulunamadı")
 
@@ -3794,9 +4184,12 @@ C: Uygulama seçtiğiniz tüm görselleri hedef klasörün 'images/' dizinine ot
         if curr_tab == 0: # Project
             title = self.proj_title_entry.get().strip() or "Untitled Project"
             body = self.content_editor.render_html(media_copy_callback=preview_media_url)
-            cover_uri = preview_media_url(self.proj_cover_path)
-            
-            header_style = f"background-image: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.85)), url('{cover_uri}');"
+            if self.proj_cover_path:
+                cover_uri = preview_media_url(self.proj_cover_path)
+                header_style = f"background-image: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.85)), url('{cover_uri}'); background-size: cover; background-position: center;"
+            else:
+                cover_uri = ""
+                header_style = ""
             
             tags_raw = [t.strip() for t in self.proj_tags_entry.get().split(',') if t.strip()]
             status = self.proj_status_combo.get()

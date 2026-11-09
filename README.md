@@ -1,4 +1,4 @@
-# 🛠️ MICROLab Editor v1.0.2
+# 🛠️ MICROLab Editor v1.0.3
 
 MICROLab web sitesi için geliştirilmiş, bağımsız (standalone), görsel ve modern masaüstü içerik yönetim editörü (Python / Tkinter).
 
@@ -8,7 +8,7 @@ Bu araç sayesinde herhangi bir HTML kodlaması yapmadan; araştırma projeleri,
 
 ## 📋 İçindekiler
 - [🌟 Öne Çıkan Özellikler](#-öne-çıkan-özellikler)
-- [🆕 v1.0.2 ile Gelen Yenilikler](#-v102-ile-gelen-yenilikler)
+- [🆕 v1.0.3 ile Gelen Yenilikler](#-v103-ile-gelen-yenilikler)
 - [🚀 Kurulum ve Çalıştırma Rehberi](#-kurulum-ve-çalıştırma-rehberi)
   - [💻 Windows İçin](#-windows-için)
   - [🐧 Linux İçin](#-linux-için)
@@ -35,13 +35,14 @@ Bu araç sayesinde herhangi bir HTML kodlaması yapmadan; araştırma projeleri,
 
 ---
 
-## 🆕 v1.0.2 ile Gelen Yenilikler
+## 🆕 v1.0.3 ile Gelen Yenilikler
 
+* **macOS Canlı Önizleme Görsel Desteği:** macOS Safari ve Chrome'un katı yerel dosya kısıtlamalarını (`file://` çapraz dizin engeli) aşmak için canlı önizlemede görseller anlık Data URI (base64) motoru ile yüklenir; Finder üzerinden eklenen tüm fotoğraflar önizlemede anında ve eksiksiz görünür.
+* **%100 Bağımsız ve Tek Başına Çalışma:** Medya taşınabilirliği, URL güvenliği ve akıllı önizleme motorlarının tamamı doğrudan `app.py` içerisine gömüldü. Dosya Mac veya Linux'a tek başına aktarılsa dahi eksik modül hatası vermeden çalışır.
 * **macOS ve Linux Görsel Seçimi:** Mac Finder ve Linux dosya yöneticilerinde fotoğrafların görünmesini engelleyen filtre sorunu giderildi; büyük harfli (`.JPG`, `.PNG`) ve modern formatlar dahil edildi.
 * **Akıllı Canlı Önizleme:** Tarayıcı yenilemesi içerik takip motoruna bağlandı. Sayfada değişiklik yokken gereksiz yenilemeler engellendi. "Otomatik Yenile" kapatıldığında tarayıcı yenilemesi anında durur.
 * **Proje Taşınabilirliği:** Farklı bilgisayarlardan alınan projeler editöre aktarıldığında kapak fotoğrafları ve galeri görselleri eksiksiz olarak açılır.
 * **Güvenli Dosya Kaydı:** Aynı isimde farklı fotoğraflar yüklendiğinde eski fotoğrafların üzerine yazılması önlendi; içerikler çakışmasız olarak saklanır.
-* **Gelişmiş Kararlılık:** Kılavuz sekmesindeyken önizleme açıldığında oluşan hata giderildi, otomatik güncelleme altyapısı daha güvenli hale getirildi.
 
 ---
 

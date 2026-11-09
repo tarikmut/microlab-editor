@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# MICROLab Editor v1.0.2 - Güvenli Linux/macOS Başlatıcı
+# MICROLab Editor v1.0.3 - Güvenli Linux/macOS Başlatıcı
 set -e
 cd "$(dirname "$0")"
 
 echo "========================================================"
-echo "  MICROLab Editor v1.0.2"
+echo "  MICROLab Editor v1.0.3"
 echo "========================================================"
 echo ""
 

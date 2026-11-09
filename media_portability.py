@@ -13,6 +13,8 @@ import re
 import html
 import shutil
 import hashlib
+import base64
+import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -67,6 +69,42 @@ def path_to_file_uri(path_str):
         parts = resolved.split('/')
         quoted_parts = [quote(p, safe='') for p in parts]
         return "file://" + '/'.join(quoted_parts)
+
+
+def file_to_data_uri(file_path):
+    """
+    Converts a local image file to a base64 Data URI for cross-platform browser preview.
+    Bypasses macOS Safari and Chrome local file cross-origin restrictions on file:// URLs.
+    """
+    if not file_path:
+        return ""
+    try:
+        p = Path(file_path).resolve()
+        if not p.is_file():
+            return ""
+        ext = p.suffix.lower()
+        mime_map = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.bmp': 'image/bmp',
+            '.ico': 'image/x-icon',
+            '.tiff': 'image/tiff',
+            '.tif': 'image/tiff'
+        }
+        mime_type = mime_map.get(ext)
+        if not mime_type:
+            mime_type, _ = mimetypes.guess_type(str(p))
+        if not mime_type:
+            mime_type = 'image/jpeg'
+        with open(p, 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode('ascii')
+        return f"data:{mime_type};base64,{encoded}"
+    except Exception:
+        return ""
 
 
 def calculate_file_hash(file_path):

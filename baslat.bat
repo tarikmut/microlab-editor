@@ -4,7 +4,7 @@ title MICROLab Editor - Başlatıcı
 cd /d "%~dp0"
 
 echo ========================================================
-echo   MICROLab Editor v1.0.2
+echo   MICROLab Editor v1.0.3
 echo ========================================================
 echo.
 
